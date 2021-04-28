@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>AllEnabledByDefault</AnalysisMode>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1014</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>dataflow-hosting</PackageId>
+    <Title>Dataflow Hosting</Title>
+    <Authors>Kyle McClellan</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kmcclellan/dataflow-hosting</PackageProjectUrl>
+    <Description>An extension of Microsoft.Extensions.Hosting to use with System.Threading.Tasks.Dataflow.</Description>
+    <PackageReleaseNotes>https://github.com/kmcclellan/dataflow-hosting/releases/v$(Version)</PackageReleaseNotes>
+    <Copyright>%A9 2021 Kyle McClellan</Copyright>
+    <PackageTags>extensions;hosting;dataflow;tpl</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/kmcclellan/dataflow-hosting.git</RepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedAllSources>true</EmbedAllSources>
+  </PropertyGroup>
+
+</Project>
