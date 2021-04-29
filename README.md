@@ -39,6 +39,36 @@ class MyService : DataflowService
 }
 ```
 
+Alternatively, implement `BatchingService<T>`:
+
+```c#
+class MyService : BatchingService<string>
+{
+    public MyService()
+        : base (new BatchHostingOptions { BatchSize = 3 })
+    {
+        // Initialize application data source.
+        var buffer = new BufferBlock<string>(
+            new DataflowBlockOptions { CancellationToken = this.CancellationToken });
+
+        foreach (var name in new[] { "Bill", "Suzy", "Dana", "Walt", "Abigail", "Montgomery", "Harold" })
+        {
+            buffer.Post(name);
+        }
+
+        this.Source = buffer;
+    }
+
+    protected override ISourceBlock<string> Source { get; }
+
+    protected override Task ProcessBatch(IReadOnlyList<string> batch, CancellationToken cancellationToken)
+    {
+        Console.WriteLine($"Hello, {string.Join(" and ", batch)}.");
+        return Task.Delay(1000, cancellationToken);
+    }
+}
+```
+
 Register with host:
 
 ```c#
