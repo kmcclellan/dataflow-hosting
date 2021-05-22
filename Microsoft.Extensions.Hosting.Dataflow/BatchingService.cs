@@ -13,10 +13,10 @@
     /// <typeparam name="T">The type of data processed by the service.</typeparam>
     public abstract class BatchingService<T> : DataflowService
     {
-        private readonly BatchBlock<T> batcher;
-        private readonly ActionBlock<T[]> processor;
-        private readonly Timer intervalTimer;
+        private static readonly DataflowLinkOptions LinkOptions = new() { PropagateCompletion = true };
+
         private readonly BatchHostingOptions options;
+        private Timer? intervalTimer;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="BatchingService{T}"/> class.
@@ -25,44 +25,6 @@
         protected BatchingService(BatchHostingOptions? options = null)
         {
             this.options = options ?? new BatchHostingOptions();
-
-            this.batcher = new BatchBlock<T>(
-                this.options.BatchSize ?? int.MaxValue,
-                new GroupingDataflowBlockOptions
-                {
-                    BoundedCapacity = this.options.BatchSize ?? DataflowBlockOptions.Unbounded,
-                    CancellationToken = this.CancellationToken,
-                });
-
-            this.intervalTimer = new Timer(
-                obj => ((BatchBlock<T>)obj!).TriggerBatch(),
-                this.batcher,
-                Timeout.Infinite,
-                Timeout.Infinite);
-
-            this.processor = new ActionBlock<T[]>(
-                async batch =>
-                {
-                    this.SetInterval();
-
-                    try
-                    {
-                        await this.ProcessBatch(batch, this.CancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (this.CancellationToken.IsCancellationRequested)
-                    {
-                    }
-                },
-                new ExecutionDataflowBlockOptions
-                {
-                    SingleProducerConstrained = true,
-                    MaxDegreeOfParallelism = this.options.Parallelism ?? DataflowBlockOptions.Unbounded,
-                    BoundedCapacity = this.options.Parallelism ?? DataflowBlockOptions.Unbounded,
-                    CancellationToken = this.CancellationToken,
-                });
-
-            this.Processors.Add(this.processor);
-            this.Processors.Add(this.batcher);
         }
 
         /// <summary>
@@ -70,12 +32,17 @@
         /// </summary>
         protected abstract ISourceBlock<T> Source { get; }
 
+        /// <summary>
+        /// Gets the downstream target for batch sizes (after processing), if any.
+        /// </summary>
+        protected virtual ITargetBlock<int>? Target => null;
+
         /// <inheritdoc/>
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                this.intervalTimer.Dispose();
+                this.intervalTimer?.Dispose();
             }
 
             base.Dispose(disposing);
@@ -95,21 +62,78 @@
         /// <inheritdoc/>
         protected override IDataflowBlock StartPipeline()
         {
-            var linkOptions = new DataflowLinkOptions { PropagateCompletion = true };
-            this.batcher.LinkTo(this.processor, linkOptions);
-            this.Source.LinkTo(this.batcher, linkOptions);
+            var batcher = new BatchBlock<T>(
+                this.options.BatchSize ?? int.MaxValue,
+                new GroupingDataflowBlockOptions
+                {
+                    BoundedCapacity = this.options.BatchSize ?? DataflowBlockOptions.Unbounded,
+                    CancellationToken = this.CancellationToken,
+                });
 
-            this.SetInterval();
+            ITargetBlock<T[]> processor;
+            var processorOptions = new ExecutionDataflowBlockOptions
+            {
+                SingleProducerConstrained = true,
+                MaxDegreeOfParallelism = this.options.Parallelism ?? DataflowBlockOptions.Unbounded,
+                BoundedCapacity = this.options.Parallelism ?? DataflowBlockOptions.Unbounded,
+                CancellationToken = this.CancellationToken,
+            };
 
+            if (this.Target == null)
+            {
+                processor = new ActionBlock<T[]>(
+                    GetDelegate(batcher, this.ProcessBatch),
+                    processorOptions);
+            }
+            else
+            {
+                var transformer = new TransformBlock<T[], int>(
+                    GetDelegate(
+                        batcher,
+                        (batch, ct) =>
+                        {
+                            this.ProcessBatch(batch, ct);
+                            return batch.Count;
+                        }),
+                    processorOptions);
+
+                processor = transformer;
+
+                transformer.LinkTo(this.Target, LinkOptions);
+                this.Processors.Add(this.Target);
+            }
+
+            batcher.LinkTo(processor, LinkOptions);
+            this.Source.LinkTo(batcher, LinkOptions);
+
+            this.Processors.Add(processor);
+            this.Processors.Add(batcher);
             return this.Source;
         }
 
-        private void SetInterval()
+        private Func<IReadOnlyList<T>, TTask> GetDelegate<TTask>(
+            BatchBlock<T> batcher,
+            Func<IReadOnlyList<T>, CancellationToken, TTask> process)
         {
             if (this.options.BatchInterval != null)
             {
-                this.intervalTimer.Change(this.options.BatchInterval.Value, this.options.BatchInterval.Value);
+                this.intervalTimer = new Timer(
+                    obj => ((BatchBlock<T>)obj!).TriggerBatch(),
+                    batcher,
+                    this.options.BatchInterval.Value,
+                    this.options.BatchInterval.Value);
+
+                return batch =>
+                {
+                    this.intervalTimer.Change(
+                        this.options.BatchInterval.Value,
+                        this.options.BatchInterval.Value);
+
+                    return process(batch, this.CancellationToken);
+                };
             }
+
+            return batch => process(batch, this.CancellationToken);
         }
     }
 }
